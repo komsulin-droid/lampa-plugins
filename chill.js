@@ -99,6 +99,7 @@
                 all.forEach(function (f) {
                     var ext = extOf(f.name);
                     if (f.name.indexOf('_thumb') !== -1) return;
+                    if (f.private === 'true' || f.private === true) return;
 
                     if (VIDEO_EXT.indexOf(ext) !== -1) videos.push(f);
                     else if (SUB_EXT.indexOf(ext) !== -1) subs.push(f);
@@ -215,6 +216,8 @@
         };
 
         if (file.subtitles && file.subtitles.length) video.subtitles = file.subtitles;
+
+        console.log('[chill] play url:', file.url);
 
         Lampa.Player.play(video);
         Lampa.Player.playlist([video]);
