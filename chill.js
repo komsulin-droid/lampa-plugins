@@ -149,19 +149,20 @@
         }
     };
 
-    // ---------- Адаптер: відкриті фільми Blender (для тесту відтворення) ----------
-    // Це чотири короткометражки під відкритою ліцензією Creative Commons.
-    // Файли стандартного mp4 (H.264), тож добре підходять, щоб перевірити плеєр.
-    // Результати не залежать від назви фільму, на сторінці якого ви натиснули «Онлайн».
+    // ---------- Адаптер: тестове відео MDN (для перевірки відтворення) ----------
+    // Коротке відео з квіткою під ліцензією CC0 із прикладів документації MDN (Mozilla).
+    // Є у двох форматах: mp4 (H.264) та webm. Звуку в ньому немає, лише картинка.
+    // Результат не залежить від назви фільму, на сторінці якого ви натиснули «Онлайн».
 
-    var BlenderFilms = {
-        name: 'Відкриті фільми Blender (тест)',
-        base: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/',
+    var TestVideo = {
+        name: 'Тестове відео (MDN)',
+        base: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/',
         catalog: [
-            { id: 'bbb', title: 'Big Buck Bunny', year: 2008, file: 'BigBuckBunny.mp4' },
-            { id: 'ed', title: 'Elephants Dream', year: 2006, file: 'ElephantsDream.mp4' },
-            { id: 'sintel', title: 'Sintel', year: 2010, file: 'Sintel.mp4' },
-            { id: 'tos', title: 'Tears of Steel', year: 2012, file: 'TearsOfSteel.mp4' }
+            { id: 'flower', title: 'Flower (тест)', year: '' }
+        ],
+        variants: [
+            { file: 'flower.mp4', quality: 'MP4 · H.264', ext: 'mp4' },
+            { file: 'flower.webm', quality: 'WEBM', ext: 'webm' }
         ],
 
         search: function (movie, ok) {
@@ -169,18 +170,22 @@
         },
 
         files: function (item, ok) {
-            ok([{
-                title: item.file,
-                quality: 'MP4 · H.264',
-                ext: 'mp4',
-                size: 0,
-                url: this.base + item.file,
-                subtitles: []
-            }]);
+            var base = this.base;
+
+            ok(this.variants.map(function (v) {
+                return {
+                    title: v.file,
+                    quality: v.quality,
+                    ext: v.ext,
+                    size: 0,
+                    url: base + v.file,
+                    subtitles: []
+                };
+            }));
         }
     };
 
-    var SOURCES = [InternetArchive, BlenderFilms];
+    var SOURCES = [InternetArchive, TestVideo];
 
     // ---------- Інтерфейс ----------
 
