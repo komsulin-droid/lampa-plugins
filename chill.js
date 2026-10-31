@@ -2,16 +2,11 @@
     'use strict';
 
     /*
-     * Плагін «Онлайн (Internet Archive)» для Lampa
-     * Джерело: archive.org (відкриті фільми та фільми в суспільному надбанні)
-     *
-     * Структура модульна: кожне джерело — окремий адаптер з методами
-     *   search(movie, ok, fail)  -> список результатів [{id, title, year}]
-     *   files(item, ok, fail)    -> список файлів [{title, url, quality, subtitles}]
-     * Щоб додати нове джерело (наприклад Jellyfin), допишіть ще один адаптер у SOURCES.
+     * Плагін «Онлайн (Мої джерела)» для Lampa
+     * Джерела: EX-FS та HDRezka
      */
 
-    var PLUGIN_ID = 'ia_online';
+    var PLUGIN_ID = 'my_online_sources';
     var BTN_CLASS = 'view--' + PLUGIN_ID;
     var TIMEOUT = 15000;
 
@@ -37,162 +32,132 @@
         net.silent(url, ok, fail);
     }
 
-    function formatSize(bytes) {
-        bytes = parseInt(bytes, 10);
-        if (!bytes) return '';
-        var mb = bytes / 1048576;
-        return mb >= 1024 ? (mb / 1024).toFixed(1) + ' ГБ' : Math.round(mb) + ' МБ';
-    }
+    // ---------- Адаптер: EX-FS ----------
 
-    function extOf(name) {
-        var m = /\.([a-z0-9]+)$/i.exec(name || '');
-        return m ? m[1].toLowerCase() : '';
-    }
-
-    function baseName(name) {
-        return (name || '').replace(/\.[^.]+$/, '');
-    }
-
-    // ---------- Адаптер: Internet Archive ----------
-
-    var VIDEO_EXT = ['mp4', 'm4v', 'webm', 'ogv', 'mkv'];
-    var SUB_EXT = ['vtt', 'srt'];
-
-    var InternetArchive = {
-        name: 'Internet Archive',
+    var ExFsAdapter = {
+        name: 'EX-FS',
+        baseUrl: 'https://ex-fs.net',
 
         search: function (movie, ok, fail) {
-            var titles = [];
-            [movie.title, movie.name, movie.original_title, movie.original_name].forEach(function (t) {
-                if (t && titles.indexOf(t) === -1) titles.push(t);
-            });
+            var query = movie.title || movie.name || movie.original_title;
+            if (!query) return ok([]);
 
-            if (!titles.length) return ok([]);
+            // Формуємо пошуковий запит до EX-FS
+            var url = this.baseUrl + '/index.php?do=search&subaction=search&story=' + encodeURIComponent(query);
 
-            var q = titles.map(function (t) {
-                return 'title:("' + t.replace(/["\\]/g, ' ') + '")';
-            }).join(' OR ');
+            request(url, function (html) {
+                var items = [];
+                // Парсимо результати за допомогою jQuery (Lampa має вбудований парсер)
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(html, 'text/html');
+                
+                doc.querySelectorAll('.short-item, .movie-item, .item').forEach(function (el) {
+                    var titleEl = el.querySelector('.short-title, .title, a');
+                    var linkEl = el.querySelector('a');
+                    
+                    if (titleEl && linkEl) {
+                        items.push({
+                            id: linkEl.href,
+                            title: titleEl.textContent.trim(),
+                            year: ''
+                        });
+                    }
+                });
 
-            var url = 'https://archive.org/advancedsearch.php' +
-                '?q=' + encodeURIComponent('(' + q + ') AND mediatype:(movies)') +
-                '&fl[]=identifier&fl[]=title&fl[]=year' +
-                '&rows=25&page=1&output=json&sort[]=downloads+desc';
-
-            request(url, function (json) {
-                var docs = (json && json.response && json.response.docs) || [];
-                ok(docs.map(function (d) {
-                    return {
-                        id: d.identifier,
-                        title: Array.isArray(d.title) ? d.title[0] : d.title,
-                        year: d.year || ''
-                    };
-                }));
+                // Якщо класи відрізняються, запасний варіант або повернення порожнього масиву
+                ok(items);
             }, fail);
         },
 
         files: function (item, ok, fail) {
-            request('https://archive.org/metadata/' + encodeURIComponent(item.id), function (json) {
-                var all = (json && json.files) || [];
-                var videos = [];
-                var subs = [];
+            // Завантажуємо сторінку конкретного фільму для отримання відео/потоків
+            request(item.id, function (html) {
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(html, 'text/html');
+                var files = [];
 
-                all.forEach(function (f) {
-                    var ext = extOf(f.name);
-                    if (f.name.indexOf('_thumb') !== -1) return;
-                    if (f.private === 'true' || f.private === true) return;
-
-                    if (VIDEO_EXT.indexOf(ext) !== -1) videos.push(f);
-                    else if (SUB_EXT.indexOf(ext) !== -1) subs.push(f);
+                // Шукаємо плейєри або iframe на сторінці
+                doc.querySelectorAll('iframe, video source').forEach(function (el, index) {
+                    var src = el.src || el.getAttribute('data-src');
+                    if (src) {
+                        files.push({
+                            title: 'Відео джерело #' + (index + 1),
+                            quality: 'HD',
+                            url: src,
+                            subtitles: []
+                        });
+                    }
                 });
 
-                var base = 'https://archive.org/download/' + encodeURIComponent(item.id) + '/';
-
-                var result = videos.map(function (f) {
-                    var bn = baseName(f.name);
-                    var related = subs.filter(function (s) {
-                        return baseName(s.name).indexOf(bn) === 0;
-                    }).map(function (s) {
-                        return {
-                            label: s.name,
-                            url: base + s.name.split('/').map(encodeURIComponent).join('/')
-                        };
-                    });
-
-                    var size = formatSize(f.size);
-                    var quality = (f.height ? f.height + 'p' : '') || (f.format || '').trim();
-                    var ext = extOf(f.name);
-
-                    return {
-                        title: f.name + (size ? '  [' + size + ']' : ''),
-                        quality: (quality ? quality + ' · ' : '') + ext.toUpperCase(),
-                        ext: ext,
-                        size: parseInt(f.size, 10) || 0,
-                        url: base + f.name.split('/').map(encodeURIComponent).join('/'),
-                        subtitles: related
-                    };
-                });
-
-                // Спершу mp4/m4v (їх відтворює більшість пристроїв), далі webm та інші;
-                // всередині групи найбільші файли зазвичай мають кращу якість
-                function rank(f) {
-                    if (f.ext === 'mp4' || f.ext === 'm4v') return 0;
-                    if (f.ext === 'webm') return 1;
-                    return 2;
-                }
-
-                result.sort(function (a, b) {
-                    return rank(a) - rank(b) || b.size - a.size;
-                });
-
-                ok(result);
+                ok(files);
             }, fail);
         }
     };
 
-    // ---------- Адаптер: тестове відео MDN (для перевірки відтворення) ----------
-    // Коротке відео з квіткою під ліцензією CC0 із прикладів документації MDN (Mozilla).
-    // Є у двох форматах: mp4 (H.264) та webm. Звуку в ньому немає, лише картинка.
-    // Результат не залежить від назви фільму, на сторінці якого ви натиснули «Онлайн».
+    // ---------- Адаптер: HDRezka ----------
 
-    var TestVideo = {
-        name: 'Тестове відео (MDN)',
-        base: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/',
-        catalog: [
-            { id: 'flower', title: 'Flower (тест)', year: '' }
-        ],
-        variants: [
-            { file: 'flower.mp4', quality: 'MP4 · H.264', ext: 'mp4' },
-            { file: 'flower.webm', quality: 'WEBM', ext: 'webm' }
-        ],
+    var HdRezkaAdapter = {
+        name: 'HDRezka',
+        baseUrl: 'https://ag.hdrezka-best.site',
 
-        search: function (movie, ok) {
-            ok(this.catalog);
+        search: function (movie, ok, fail) {
+            var query = movie.title || movie.name || movie.original_title;
+            if (!query) return ok([]);
+
+            var url = this.baseUrl + '/index.php?do=search&q=' + encodeURIComponent(query);
+
+            request(url, function (html) {
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(html, 'text/html');
+                var items = [];
+
+                doc.querySelectorAll('.b-content__inline_item').forEach(function (el) {
+                    var linkEl = el.querySelector('.b-content__inline_item-link a');
+                    var titleEl = linkEl ? linkEl.textContent : '';
+                    var href = linkEl ? linkEl.href : '';
+                    var yearEl = el.querySelector('.b-content__inline_item-link i');
+
+                    if (href) {
+                        items.push({
+                            id: href,
+                            title: titleEl.trim(),
+                            year: yearEl ? yearEl.textContent.trim() : ''
+                        });
+                    }
+                });
+
+                ok(items);
+            }, fail);
         },
 
-        files: function (item, ok) {
-            var base = this.base;
+        files: function (item, ok, fail) {
+            request(item.id, function (html) {
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(html, 'text/html');
+                var files = [];
 
-            ok(this.variants.map(function (v) {
-                return {
-                    title: v.file,
-                    quality: v.quality,
-                    ext: v.ext,
-                    size: 0,
-                    url: base + v.file,
-                    subtitles: []
-                };
-            }));
+                // HDRezka зазвичай завантажує плеєр через скрипти або iframe, 
+                // шукаємо трансляції або прямі ссилки на потоки в доступних елементах
+                doc.querySelectorAll('iframe').forEach(function (iframe, index) {
+                    var src = iframe.src;
+                    if (src) {
+                        files.push({
+                            title: 'HDRezka Потік #' + (index + 1),
+                            quality: 'Web Stream',
+                            url: src,
+                            subtitles: []
+                        });
+                    }
+                });
+
+                ok(files);
+            }, fail);
         }
     };
 
-    var SOURCES = [InternetArchive, TestVideo];
+    var SOURCES = [ExFsAdapter, HdRezkaAdapter];
 
-    // ---------- Інтерфейс ----------
-
-    function getSource() {
-        var saved = Lampa.Storage.get(PLUGIN_ID + '_source', '0');
-        return SOURCES[parseInt(saved, 10)] || SOURCES[0];
-    }
+    // ---------- Інтерфейс та Логіка Lampa ----------
 
     function backToContent() {
         Lampa.Controller.toggle('content');
@@ -221,7 +186,7 @@
             loadingStop();
 
             if (!files.length) {
-                notify('У цьому записі немає відеофайлів');
+                notify('Не вдалося знайти доступні відеофайли');
                 return showResults(movie, source, []);
             }
 
@@ -241,7 +206,7 @@
             });
         }, function () {
             loadingStop();
-            notify('Не вдалося отримати список файлів');
+            notify('Помилка завантаження файлів');
         });
     }
 
@@ -253,17 +218,13 @@
 
         if (file.subtitles && file.subtitles.length) video.subtitles = file.subtitles;
 
-        console.log('[chill] play url:', file.url);
-
         Lampa.Player.play(video);
         Lampa.Player.playlist([video]);
     }
 
     function start(movie) {
-        if (SOURCES.length === 1) return run(movie, SOURCES[0]);
-
         Lampa.Select.show({
-            title: 'Джерело',
+            title: 'Виберіть джерело',
             items: SOURCES.map(function (s) {
                 return { title: s.name, source: s };
             }),
@@ -289,17 +250,15 @@
         });
     }
 
-    // ---------- Кнопка на сторінці фільму ----------
-
     function addButton(e) {
         var render = e.object.activity.render();
 
         if (render.find('.' + BTN_CLASS).length) return;
 
         var btn = $(
-            '<div class="full-start__button selector view--online ' + BTN_CLASS + '" data-subtitle="Internet Archive">' +
+            '<div class="full-start__button selector view--online ' + BTN_CLASS + '" data-subtitle="EX-FS & Rezka">' +
                 '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>' +
-                '<span>Онлайн</span>' +
+                '<span>Мої джерела</span>' +
             '</div>'
         );
 
@@ -308,7 +267,6 @@
         });
 
         var anchor = render.find('.view--torrent');
-
         if (anchor.length) anchor.after(btn);
         else render.find('.full-start-new__buttons, .full-start__buttons').first().append(btn);
     }
