@@ -119,19 +119,28 @@
 
                     var size = formatSize(f.size);
                     var quality = (f.height ? f.height + 'p' : '') || (f.format || '').trim();
+                    var ext = extOf(f.name);
 
                     return {
                         title: f.name + (size ? '  [' + size + ']' : ''),
-                        quality: quality,
+                        quality: (quality ? quality + ' · ' : '') + ext.toUpperCase(),
+                        ext: ext,
                         size: parseInt(f.size, 10) || 0,
                         url: base + f.name.split('/').map(encodeURIComponent).join('/'),
                         subtitles: related
                     };
                 });
 
-                // Найбільші файли зазвичай мають кращу якість
+                // Спершу mp4/m4v (їх відтворює більшість пристроїв), далі webm та інші;
+                // всередині групи найбільші файли зазвичай мають кращу якість
+                function rank(f) {
+                    if (f.ext === 'mp4' || f.ext === 'm4v') return 0;
+                    if (f.ext === 'webm') return 1;
+                    return 2;
+                }
+
                 result.sort(function (a, b) {
-                    return b.size - a.size;
+                    return rank(a) - rank(b) || b.size - a.size;
                 });
 
                 ok(result);
