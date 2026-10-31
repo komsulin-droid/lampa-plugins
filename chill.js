@@ -2,8 +2,7 @@
     'use strict';
 
     /*
-     * Плагін «Онлайн (Мої джерела)» для Lampa
-     * Джерела: EX-FS та HDRezka
+     * Плагін «Онлайн (Мої джерела)» для Lampa з обходом CORS та User-Agent
      */
 
     var PLUGIN_ID = 'my_online_sources';
@@ -26,10 +25,24 @@
         if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
     }
 
+    // Покращений запит із заголовками браузера для уникнення "помилки запиту"
     function request(url, ok, fail) {
         var net = new Lampa.Reguest();
         net.timeout(TIMEOUT);
-        net.silent(url, ok, fail);
+        
+        // Використовуємо native-запит із заголовками імітації браузера
+        if (typeof net.native === 'function') {
+            net.native(url, function (html) {
+                ok(html);
+            }, fail, false, {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+            });
+        } else {
+            // Запасний варіант стандартного запиту
+            net.silent(url, ok, fail);
+        }
     }
 
     // ---------- Адаптер: EX-FS ----------
@@ -42,12 +55,10 @@
             var query = movie.title || movie.name || movie.original_title;
             if (!query) return ok([]);
 
-            // Формуємо пошуковий запит до EX-FS
             var url = this.baseUrl + '/index.php?do=search&subaction=search&story=' + encodeURIComponent(query);
 
             request(url, function (html) {
                 var items = [];
-                // Парсимо результати за допомогою jQuery (Lampa має вбудований парсер)
                 var parser = new DOMParser();
                 var doc = parser.parseFromString(html, 'text/html');
                 
@@ -64,19 +75,16 @@
                     }
                 });
 
-                // Якщо класи відрізняються, запасний варіант або повернення порожнього масиву
                 ok(items);
             }, fail);
         },
 
         files: function (item, ok, fail) {
-            // Завантажуємо сторінку конкретного фільму для отримання відео/потоків
             request(item.id, function (html) {
                 var parser = new DOMParser();
                 var doc = parser.parseFromString(html, 'text/html');
                 var files = [];
 
-                // Шукаємо плейєри або iframe на сторінці
                 doc.querySelectorAll('iframe, video source').forEach(function (el, index) {
                     var src = el.src || el.getAttribute('data-src');
                     if (src) {
@@ -136,8 +144,6 @@
                 var doc = parser.parseFromString(html, 'text/html');
                 var files = [];
 
-                // HDRezka зазвичай завантажує плеєр через скрипти або iframe, 
-                // шукаємо трансляції або прямі ссилки на потоки в доступних елементах
                 doc.querySelectorAll('iframe').forEach(function (iframe, index) {
                     var src = iframe.src;
                     if (src) {
