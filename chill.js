@@ -2,14 +2,12 @@
     'use strict';
 
     /*
-     * Плагін «Онлайн (Мої джерела)» для Lampa з обходом CORS та User-Agent
+     * Плагін «Онлайн (JSON API Балансер)» для Lampa
      */
 
-    var PLUGIN_ID = 'my_online_sources';
+    var PLUGIN_ID = 'json_balancer_plugin';
     var BTN_CLASS = 'view--' + PLUGIN_ID;
     var TIMEOUT = 15000;
-
-    // ---------- Допоміжні функції ----------
 
     function notify(text) {
         if (Lampa.Noty) Lampa.Noty.show(text);
@@ -25,236 +23,94 @@
         if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
     }
 
-    // Покращений запит із заголовками браузера для уникнення "помилки запиту"
+    // Запит за допомогою вбудованого механізму Lampa.Reguest
     function request(url, ok, fail) {
         var net = new Lampa.Reguest();
         net.timeout(TIMEOUT);
-        
-        // Використовуємо native-запит із заголовками імітації браузера
-        if (typeof net.native === 'function') {
-            net.native(url, function (html) {
-                ok(html);
-            }, fail, false, {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
-            });
-        } else {
-            // Запасний варіант стандартного запиту
-            net.silent(url, ok, fail);
-        }
+        net.silent(url, ok, fail);
     }
 
-    // ---------- Адаптер: EX-FS ----------
+    // ---------- Головна логіка отримання потоків від API ----------
 
-    var ExFsAdapter = {
-        name: 'EX-FS',
-        baseUrl: 'https://ex-fs.net',
+    function fetchStreams(movie, ok, fail) {
+        var tmdb_id = movie.id; // TMDB ID фільму/серіалу
+        if (!tmdb_id) return fail();
 
-        search: function (movie, ok, fail) {
-            var query = movie.title || movie.name || movie.original_title;
-            if (!query) return ok([]);
+        // Приклад публічного чи вашого API-балансера, що приймає TMDB ID і віддає JSON
+        // (Замініть URL на актуальну адресу вашого улюбленого API або сервера Lampac)
+        var api_url = 'https://vokino.tv/api/version?id=' + tmdb_id; 
 
-            var url = this.baseUrl + '/index.php?do=search&subaction=search&story=' + encodeURIComponent(query);
+        request(api_url, function (json) {
+            var streams = [];
 
-            request(url, function (html) {
-                var items = [];
-                var parser = new DOMParser();
-                var doc = parser.parseFromString(html, 'text/html');
-                
-                doc.querySelectorAll('.short-item, .movie-item, .item').forEach(function (el) {
-                    var titleEl = el.querySelector('.short-title, .title, a');
-                    var linkEl = el.querySelector('a');
-                    
-                    if (titleEl && linkEl) {
-                        items.push({
-                            id: linkEl.href,
-                            title: titleEl.textContent.trim(),
-                            year: ''
-                        });
-                    }
+            // Приклад розбору JSON-відповіді від балансера
+            // (Структура залежить від конкретного API, який ви використовуєте)
+            if (json && json.results) {
+                json.results.forEach(function (item) {
+                    streams.push({
+                        title: item.title || 'Потік',
+                        quality: item.quality || 'HD',
+                        url: item.url,
+                        subtitles: item.subtitles || []
+                    });
                 });
+            }
 
-                ok(items);
-            }, fail);
-        },
+            ok(streams);
+        }, fail);
+    }
 
-        files: function (item, ok, fail) {
-            request(item.id, function (html) {
-                var parser = new DOMParser();
-                var doc = parser.parseFromString(html, 'text/html');
-                var files = [];
-
-                doc.querySelectorAll('iframe, video source').forEach(function (el, index) {
-                    var src = el.src || el.getAttribute('data-src');
-                    if (src) {
-                        files.push({
-                            title: 'Відео джерело #' + (index + 1),
-                            quality: 'HD',
-                            url: src,
-                            subtitles: []
-                        });
-                    }
-                });
-
-                ok(files);
-            }, fail);
-        }
-    };
-
-    // ---------- Адаптер: HDRezka ----------
-
-    var HdRezkaAdapter = {
-        name: 'HDRezka',
-        baseUrl: 'https://ag.hdrezka-best.site',
-
-        search: function (movie, ok, fail) {
-            var query = movie.title || movie.name || movie.original_title;
-            if (!query) return ok([]);
-
-            var url = this.baseUrl + '/index.php?do=search&q=' + encodeURIComponent(query);
-
-            request(url, function (html) {
-                var parser = new DOMParser();
-                var doc = parser.parseFromString(html, 'text/html');
-                var items = [];
-
-                doc.querySelectorAll('.b-content__inline_item').forEach(function (el) {
-                    var linkEl = el.querySelector('.b-content__inline_item-link a');
-                    var titleEl = linkEl ? linkEl.textContent : '';
-                    var href = linkEl ? linkEl.href : '';
-                    var yearEl = el.querySelector('.b-content__inline_item-link i');
-
-                    if (href) {
-                        items.push({
-                            id: href,
-                            title: titleEl.trim(),
-                            year: yearEl ? yearEl.textContent.trim() : ''
-                        });
-                    }
-                });
-
-                ok(items);
-            }, fail);
-        },
-
-        files: function (item, ok, fail) {
-            request(item.id, function (html) {
-                var parser = new DOMParser();
-                var doc = parser.parseFromString(html, 'text/html');
-                var files = [];
-
-                doc.querySelectorAll('iframe').forEach(function (iframe, index) {
-                    var src = iframe.src;
-                    if (src) {
-                        files.push({
-                            title: 'HDRezka Потік #' + (index + 1),
-                            quality: 'Web Stream',
-                            url: src,
-                            subtitles: []
-                        });
-                    }
-                });
-
-                ok(files);
-            }, fail);
-        }
-    };
-
-    var SOURCES = [ExFsAdapter, HdRezkaAdapter];
-
-    // ---------- Інтерфейс та Логіка Lampa ----------
+    // ---------- Інтерфейс та меню вибору ----------
 
     function backToContent() {
         Lampa.Controller.toggle('content');
     }
 
-    function showResults(movie, source, items) {
-        Lampa.Select.show({
-            title: source.name,
-            items: items.map(function (i) {
-                return {
-                    title: i.title + (i.year ? ' (' + i.year + ')' : ''),
-                    item: i
-                };
-            }),
-            onSelect: function (selected) {
-                showFiles(movie, source, selected.item);
-            },
-            onBack: backToContent
-        });
-    }
-
-    function showFiles(movie, source, item) {
+    function showStreams(movie) {
         loadingStart();
 
-        source.files(item, function (files) {
+        fetchStreams(movie, function (streams) {
             loadingStop();
 
-            if (!files.length) {
-                notify('Не вдалося знайти доступні відеофайли');
-                return showResults(movie, source, []);
+            if (!streams.length) {
+                return notify('Не вдалося знайти потоки в балансері');
             }
 
             Lampa.Select.show({
-                title: item.title,
-                items: files.map(function (f) {
+                title: 'Виберіть потік (Балансер)',
+                items: streams.map(function (s) {
                     return {
-                        title: f.title,
-                        subtitle: f.quality,
-                        file: f
+                        title: s.title,
+                        subtitle: s.quality,
+                        stream: s
                     };
                 }),
                 onSelect: function (selected) {
-                    play(movie, selected.file);
+                    play(movie, selected.stream);
                 },
                 onBack: backToContent
             });
         }, function () {
             loadingStop();
-            notify('Помилка завантаження файлів');
+            notify('Помилка запиту до API балансера');
         });
     }
 
-    function play(movie, file) {
+    function play(movie, stream) {
         var video = {
             title: movie.title || movie.name,
-            url: file.url
+            url: stream.url
         };
 
-        if (file.subtitles && file.subtitles.length) video.subtitles = file.subtitles;
+        if (stream.subtitles && stream.subtitles.length) {
+            video.subtitles = stream.subtitles;
+        }
 
         Lampa.Player.play(video);
         Lampa.Player.playlist([video]);
     }
 
-    function start(movie) {
-        Lampa.Select.show({
-            title: 'Виберіть джерело',
-            items: SOURCES.map(function (s) {
-                return { title: s.name, source: s };
-            }),
-            onSelect: function (selected) {
-                run(movie, selected.source);
-            },
-            onBack: backToContent
-        });
-    }
-
-    function run(movie, source) {
-        loadingStart();
-
-        source.search(movie, function (items) {
-            loadingStop();
-
-            if (!items.length) return notify('Нічого не знайдено в ' + source.name);
-
-            showResults(movie, source, items);
-        }, function () {
-            loadingStop();
-            notify('Помилка запиту до ' + source.name);
-        });
-    }
+    // ---------- Додавання кнопки на сторінку фільму ----------
 
     function addButton(e) {
         var render = e.object.activity.render();
@@ -262,14 +118,14 @@
         if (render.find('.' + BTN_CLASS).length) return;
 
         var btn = $(
-            '<div class="full-start__button selector view--online ' + BTN_CLASS + '" data-subtitle="EX-FS & Rezka">' +
+            '<div class="full-start__button selector view--online ' + BTN_CLASS + '" data-subtitle="API Балансер">' +
                 '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>' +
-                '<span>Мої джерела</span>' +
+                '<span>Балансер</span>' +
             '</div>'
         );
 
         btn.on('hover:enter', function () {
-            start(e.data.movie);
+            showStreams(e.data.movie);
         });
 
         var anchor = render.find('.view--torrent');
