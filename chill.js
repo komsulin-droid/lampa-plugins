@@ -149,7 +149,38 @@
         }
     };
 
-    var SOURCES = [InternetArchive];
+    // ---------- Адаптер: відкриті фільми Blender (для тесту відтворення) ----------
+    // Це чотири короткометражки під відкритою ліцензією Creative Commons.
+    // Файли стандартного mp4 (H.264), тож добре підходять, щоб перевірити плеєр.
+    // Результати не залежать від назви фільму, на сторінці якого ви натиснули «Онлайн».
+
+    var BlenderFilms = {
+        name: 'Відкриті фільми Blender (тест)',
+        base: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/',
+        catalog: [
+            { id: 'bbb', title: 'Big Buck Bunny', year: 2008, file: 'BigBuckBunny.mp4' },
+            { id: 'ed', title: 'Elephants Dream', year: 2006, file: 'ElephantsDream.mp4' },
+            { id: 'sintel', title: 'Sintel', year: 2010, file: 'Sintel.mp4' },
+            { id: 'tos', title: 'Tears of Steel', year: 2012, file: 'TearsOfSteel.mp4' }
+        ],
+
+        search: function (movie, ok) {
+            ok(this.catalog);
+        },
+
+        files: function (item, ok) {
+            ok([{
+                title: item.file,
+                quality: 'MP4 · H.264',
+                ext: 'mp4',
+                size: 0,
+                url: this.base + item.file,
+                subtitles: []
+            }]);
+        }
+    };
+
+    var SOURCES = [InternetArchive, BlenderFilms];
 
     // ---------- Інтерфейс ----------
 
@@ -224,8 +255,21 @@
     }
 
     function start(movie) {
-        var source = getSource();
+        if (SOURCES.length === 1) return run(movie, SOURCES[0]);
 
+        Lampa.Select.show({
+            title: 'Джерело',
+            items: SOURCES.map(function (s) {
+                return { title: s.name, source: s };
+            }),
+            onSelect: function (selected) {
+                run(movie, selected.source);
+            },
+            onBack: backToContent
+        });
+    }
+
+    function run(movie, source) {
         loadingStart();
 
         source.search(movie, function (items) {
