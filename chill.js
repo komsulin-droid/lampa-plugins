@@ -236,7 +236,8 @@
         if (render.find('.' + BTN_CLASS).length) return;
 
         var btn = $(
-            '<div class="full-start__button selector ' + BTN_CLASS + '">' +
+            '<div class="full-start__button selector view--online ' + BTN_CLASS + '" data-subtitle="Internet Archive">' +
+                '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>' +
                 '<span>Онлайн</span>' +
             '</div>'
         );
